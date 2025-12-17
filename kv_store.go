@@ -11,12 +11,11 @@ import (
 
 type key struct {
 	name string
-	ttl  time.Duration
 }
 
 type value struct {
-	data      string
-	timestamp time.Time
+	data       string
+	expires_at time.Time
 }
 
 type wal struct {
@@ -119,23 +118,28 @@ func (s *store) Get(k key) (string, bool) {
 	}
 
 	//check if key has expired
-	if k.ttl > 0 && time.Since(val.timestamp) > k.ttl {
+	if !val.expires_at.IsZero() && time.Now().After(val.expires_at) {
 		return "", false
 	}
 	return val.data, true
 }
 
-func (s *store) Set(k key, v string) error {
+func (s *store) Set(k key, ttl time.Duration, v string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if err := s.wal.log_op(k, SET, v, 0); err != nil {
+	if err := s.wal.log_op(k, SET, v, ttl); err != nil {
 		return err
 	}
 
 	s.data[k] = value{
-		data:      v,
-		timestamp: time.Now(),
+		data: v,
+		expires_at: func() time.Time {
+			if ttl == 0 {
+				return time.Time{}
+			}
+			return time.Now().Add(ttl)
+		}(),
 	}
 	return nil
 }
@@ -165,7 +169,7 @@ func (s *store) Expire(k key, ttl time.Duration) error {
 		return err
 	}
 
-	val.timestamp = time.Now().Add(-k.ttl + ttl)
+	val.expires_at = time.Now().Add(ttl)
 	s.data[k] = val
 	return nil
 }
@@ -187,11 +191,16 @@ func (s *store) Ttl(k key) (time.Time, time.Duration, time.Time, error) { //retu
 		return time.Time{}, 0, time.Time{}, errors.New("the key does not exist")
 	}
 
-	if k.ttl == 0 {
-		return time.Now(), 0, time.Time{}, nil //no expiry
+	//check if key has expired
+	if !val.expires_at.IsZero() && time.Now().After(val.expires_at) {
+		return time.Time{}, 0, time.Time{}, errors.New("the key has expired")
 	}
-
-	expiry_time := val.timestamp.Add(k.ttl)
-	remaining_ttl := expiry_time.Sub(time.Now())
+	expiry_time := val.expires_at
+	var remaining_ttl time.Duration
+	if expiry_time.IsZero() {
+		remaining_ttl = 0
+	} else {
+		remaining_ttl = time.Until(expiry_time)
+	}
 	return time.Now(), remaining_ttl, expiry_time, nil
 }

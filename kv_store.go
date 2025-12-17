@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -203,4 +204,112 @@ func (s *store) Ttl(k key) (time.Time, time.Duration, time.Time, error) { //retu
 		remaining_ttl = time.Until(expiry_time)
 	}
 	return time.Now(), remaining_ttl, expiry_time, nil
+}
+
+func (s *store) read_user_command(input_parts []string) {
+	cmd := strings.ToUpper(input_parts[0])
+
+	switch cmd {
+	case "SET":
+		if len(input_parts) < 3 {
+			log.Println("SET command requires at least a key and a value")
+			return
+		}
+		key_name := input_parts[1]
+		value := input_parts[2]
+		var ttl time.Duration
+		if len(input_parts) == 4 {
+			var err error
+			ttl, err = time.ParseDuration(input_parts[3])
+			if err != nil {
+				log.Println("Invalid TTL format")
+				return
+			}
+		}
+		err := s.Set(key{name: key_name}, ttl, value)
+		if err != nil {
+			log.Printf("Error setting key: %v\n", err)
+			return
+		} else {
+			log.Printf("Key %s set successfully\n", key_name)
+		}
+
+	case "GET":
+		if len(input_parts) != 2 {
+			log.Println("GET command requires a key")
+			return
+		}
+		key_name := input_parts[1]
+		value, exists := s.Get(key{name: key_name})
+		if !exists {
+			log.Printf("Key %s does not exist\n", key_name)
+			return
+		} else {
+			log.Printf("Value for key %s: %s\n", key_name, value)
+		}
+
+	case "DELETE":
+		if len(input_parts) != 2 {
+			log.Println("DELETE command requires a key")
+			return
+		}
+		key_name := input_parts[1]
+		err := s.Delete(key{name: key_name})
+		if err != nil {
+			log.Printf("Error deleting key: %v\n", err)
+			return
+		} else {
+			log.Printf("Key %s deleted successfully\n", key_name)
+		}
+
+	case "EXPIRE":
+		if len(input_parts) != 3 {
+			log.Println("EXPIRE command requires a key and a TTL")
+			return
+		}
+		key_name := input_parts[1]
+		ttl, err := time.ParseDuration(input_parts[2])
+		if err != nil {
+			log.Println("Invalid TTL format")
+			return
+		}
+		err = s.Expire(key{name: key_name}, ttl)
+		if err != nil {
+			log.Printf("Error setting expiry: %v\n", err)
+			return
+		} else {
+			log.Printf("Expiry for key %s set to %s successfully\n", key_name, ttl.String())
+		}
+
+	case "TTL":
+		if len(input_parts) != 2 {
+			log.Println("TTL command requires a key")
+			return
+		}
+		key_name := input_parts[1]
+		current_time, ttl_duration, expiry_time, err := s.Ttl(key{name: key_name})
+		if err != nil {
+			log.Printf("Error getting TTL: %v\n", err)
+			return
+		} else {
+			log.Printf("Current time: %s, TTL duration: %s, Expiry time: %s for key %s\n", current_time.String(), ttl_duration.String(), expiry_time.String(), key_name)
+		}
+
+	case "EXISTS":
+		if len(input_parts) != 2 {
+			log.Println("EXISTS command requires a key")
+			return
+		}
+		key_name := input_parts[1]
+		exists := s.Exists(key{name: key_name})
+		if exists {
+			log.Printf("Key %s exists\n", key_name)
+		} else {
+			log.Printf("Key %s does not exist\n", key_name)
+		}
+
+	default:
+		log.Println("Unknown command")
+
+	}
 }

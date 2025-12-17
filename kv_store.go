@@ -120,13 +120,6 @@ func (s *store) Get(k key) (string, bool) {
 
 	//check if key has expired
 	if k.ttl > 0 && time.Since(val.timestamp) > k.ttl {
-		//key has expired
-		//delete it from store
-		s.lock.RUnlock() //unlock read lock before acquiring write lock
-		s.lock.Lock()
-		delete(s.data, k)
-		s.lock.Unlock()
-		s.lock.RLock() //reacquire read lock
 		return "", false
 	}
 	return val.data, true
@@ -136,7 +129,9 @@ func (s *store) Set(k key, v string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	s.wal.log_op(k, SET, v, 0)
+	if err := s.wal.log_op(k, SET, v, 0); err != nil {
+		return err
+	}
 
 	s.data[k] = value{
 		data:      v,
@@ -145,13 +140,16 @@ func (s *store) Set(k key, v string) error {
 	return nil
 }
 
-func (s *store) Delete(k key) {
+func (s *store) Delete(k key) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	s.wal.log_op(k, DELETE, "", 0)
-
+	if err := s.wal.log_op(k, DELETE, "", 0); err != nil {
+		return err
+	}
 	delete(s.data, k)
+
+	return nil
 }
 
 func (s *store) Expire(k key, ttl time.Duration) error {
@@ -163,7 +161,9 @@ func (s *store) Expire(k key, ttl time.Duration) error {
 		return errors.New("the key does not exist")
 	}
 
-	s.wal.log_op(k, EXPIRE, "", ttl)
+	if err := s.wal.log_op(k, EXPIRE, "", ttl); err != nil {
+		return err
+	}
 
 	val.timestamp = time.Now().Add(-k.ttl + ttl)
 	s.data[k] = val

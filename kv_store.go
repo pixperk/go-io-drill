@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"errors"
+	"log"
+	"os"
 	"sync"
 	"time"
 )
@@ -48,6 +51,64 @@ func new_store(wal_filename string) *store {
 	}
 }
 
+type operation_type int
+
+const (
+	SET operation_type = iota
+	DELETE
+	EXPIRE
+)
+
+func (w *wal) log_op(key key, op operation_type, value string, ttl time.Duration) error {
+	w.wal_lock.Lock()
+	defer w.wal_lock.Unlock()
+
+	//open file in append mode
+	//create if not exists
+	fd, err := os.OpenFile(w.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer fd.Close()
+
+	var log_entry string
+	switch op {
+	case SET:
+		log_entry = "SET " + key.name + " " + value + "\n"
+	case DELETE:
+		log_entry = "DELETE " + key.name + "\n"
+	case EXPIRE:
+		log_entry = "EXPIRE " + key.name + " " + ttl.String() + "\n"
+	default:
+		return errors.New("unknown operation type")
+	}
+
+	writer := bufio.NewWriter(fd)
+
+	n := 0
+	for n < len(log_entry) {
+		nn, err := writer.WriteString(log_entry[n:])
+		if err != nil {
+			return err
+		}
+		n += nn
+	}
+
+	err = writer.Flush()
+
+	if err != nil {
+		return err
+	}
+
+	err = fd.Sync()
+	if err != nil {
+		return err
+	}
+
+	log.Printf("\nlogged operation to WAL: %s\n", log_entry)
+	return nil
+}
+
 func (s *store) Get(k key) (string, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
@@ -75,6 +136,8 @@ func (s *store) Set(k key, v string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	s.wal.log_op(k, SET, v, 0)
+
 	s.data[k] = value{
 		data:      v,
 		timestamp: time.Now(),
@@ -85,6 +148,8 @@ func (s *store) Set(k key, v string) error {
 func (s *store) Delete(k key) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+
+	s.wal.log_op(k, DELETE, "", 0)
 
 	delete(s.data, k)
 }
@@ -97,6 +162,8 @@ func (s *store) Expire(k key, ttl time.Duration) error {
 	if !exists {
 		return errors.New("the key does not exist")
 	}
+
+	s.wal.log_op(k, EXPIRE, "", ttl)
 
 	val.timestamp = time.Now().Add(-k.ttl + ttl)
 	s.data[k] = val

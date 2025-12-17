@@ -207,14 +207,105 @@ func (s *Store) Ttl(k key) (string, time.Duration, string, error) { //returns cu
 	return format_time_into_readable_string(time.Now()), remaining_ttl, format_time_into_readable_string(expiry_time), nil
 }
 
-func (s *Store) Process(input_parts []string) {
+func (s *Store) Replay_wal() error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	file, err := os.Open(s.wal.filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) == 0 {
+			continue
+		}
+
+		if err := s.replayEntry(parts); err != nil {
+			return err
+		}
+
+		log.Printf("Replayed WAL entry: %s\n", line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+// replayEntry processes a WAL entry without acquiring locks or logging to WAL
+// Caller must hold s.lock
+func (s *Store) replayEntry(input_parts []string) error {
 	cmd := strings.ToUpper(input_parts[0])
 
 	switch cmd {
 	case "SET":
 		if len(input_parts) < 3 {
-			log.Println("SET command requires at least a key and a value")
-			return
+			return errors.New("SET command requires at least a key and a value")
+		}
+		key_name := input_parts[1]
+		val_str := input_parts[2]
+		var ttl time.Duration
+		if len(input_parts) == 4 {
+			var err error
+			ttl, err = time.ParseDuration(input_parts[3])
+			if err != nil {
+				return errors.New("invalid TTL format")
+			}
+		}
+		s.data[key{name: key_name}] = value{
+			data: val_str,
+			expires_at: func() time.Time {
+				if ttl == 0 {
+					return time.Time{}
+				}
+				return time.Now().Add(ttl)
+			}(),
+		}
+
+	case "DELETE":
+		if len(input_parts) != 2 {
+			return errors.New("DELETE command requires a key")
+		}
+		key_name := input_parts[1]
+		delete(s.data, key{name: key_name})
+
+	case "EXPIRE":
+		if len(input_parts) != 3 {
+			return errors.New("EXPIRE command requires a key and a TTL")
+		}
+		key_name := input_parts[1]
+		ttl, err := time.ParseDuration(input_parts[2])
+		if err != nil {
+			return errors.New("invalid ttl format")
+		}
+		k := key{name: key_name}
+		if val, exists := s.data[k]; exists {
+			val.expires_at = time.Now().Add(ttl)
+			s.data[k] = val
+		}
+
+	default:
+		return errors.New("Unknown command: " + cmd)
+	}
+
+	return nil
+}
+
+func (s *Store) Process(input_parts []string) error {
+	cmd := strings.ToUpper(input_parts[0])
+
+	switch cmd {
+	case "SET":
+		if len(input_parts) < 3 {
+			return errors.New("SET command requires at least a key and a value")
 		}
 		key_name := input_parts[1]
 		value := input_parts[2]
@@ -223,83 +314,72 @@ func (s *Store) Process(input_parts []string) {
 			var err error
 			ttl, err = time.ParseDuration(input_parts[3])
 			if err != nil {
-				log.Println("Invalid TTL format")
-				return
+				return errors.New("invalid TTL format")
 			}
 		}
 		err := s.Set(key{name: key_name}, ttl, value)
 		if err != nil {
-			log.Printf("Error setting key: %v\n", err)
-			return
+			return err
 		} else {
 			log.Printf("Key %s set successfully\n", key_name)
 		}
 
 	case "GET":
 		if len(input_parts) != 2 {
-			log.Println("GET command requires a key")
-			return
+			return errors.New("GET command requires a key")
 		}
 		key_name := input_parts[1]
 		value, exists := s.Get(key{name: key_name})
 		if !exists {
-			log.Printf("Key %s does not exist\n", key_name)
-			return
+			return errors.New("key does not exist")
+
 		} else {
 			log.Printf("Value for key %s: %s\n", key_name, value)
 		}
 
 	case "DELETE":
 		if len(input_parts) != 2 {
-			log.Println("DELETE command requires a key")
-			return
+			return errors.New("DELETE command requires a key")
 		}
 		key_name := input_parts[1]
 		err := s.Delete(key{name: key_name})
 		if err != nil {
-			log.Printf("Error deleting key: %v\n", err)
-			return
+			return err
 		} else {
 			log.Printf("Key %s deleted successfully\n", key_name)
 		}
 
 	case "EXPIRE":
 		if len(input_parts) != 3 {
-			log.Println("EXPIRE command requires a key and a TTL")
-			return
+			return errors.New("EXPIRE command requires a key and a TTL")
 		}
 		key_name := input_parts[1]
 		ttl, err := time.ParseDuration(input_parts[2])
 		if err != nil {
-			log.Println("Invalid TTL format")
-			return
+			return errors.New("invalid ttl format")
 		}
 		err = s.Expire(key{name: key_name}, ttl)
 		if err != nil {
-			log.Printf("Error setting expiry: %v\n", err)
-			return
+			return err
 		} else {
 			log.Printf("Expiry for key %s set to %s successfully\n", key_name, ttl.String())
 		}
 
 	case "TTL":
 		if len(input_parts) != 2 {
-			log.Println("TTL command requires a key")
-			return
+			return errors.New("TTL command requires a key")
 		}
 		key_name := input_parts[1]
 		current_time, ttl_duration, expiry_time, err := s.Ttl(key{name: key_name})
 		if err != nil {
-			log.Printf("Error getting TTL: %v\n", err)
-			return
+			return err
 		} else {
 			log.Printf("Current time: %s, TTL duration: %s, Expiry time: %s for key %s\n", current_time, ttl_duration.String(), expiry_time, key_name)
 		}
 
 	case "EXISTS":
 		if len(input_parts) != 2 {
-			log.Println("EXISTS command requires a key")
-			return
+			return errors.New("EXISTS command requires a key")
 		}
 		key_name := input_parts[1]
 		exists := s.Exists(key{name: key_name})
@@ -310,9 +390,11 @@ func (s *Store) Process(input_parts []string) {
 		}
 
 	default:
-		log.Println("Unknown command")
+		return errors.New("Unknown command: " + cmd)
 
 	}
+
+	return nil
 }
 
 func format_time_into_readable_string(t time.Time) string {

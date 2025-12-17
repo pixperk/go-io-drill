@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"strings"
 )
@@ -159,6 +160,8 @@ func main() {
 
 	store := New_Store("kvs_wal.log")
 
+	store.Replay_wal()
+
 	for {
 		println("kvs > [q to quit]: ")
 
@@ -181,7 +184,9 @@ func main() {
 
 		tokens := strings.Split(line, " ")
 
-		store.Process(tokens)
+		if err := store.Process(tokens); err != nil {
+			log.Printf("Error: %v\n", err)
+		}
 
 	}
 }

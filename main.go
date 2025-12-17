@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"os"
+	"strings"
 )
 
 type file struct {
@@ -154,28 +155,33 @@ func (f *file) append_to_existing_file_using_buffered_writer_then_read_the_new_c
 }
 
 func main() {
+	reader := bufio.NewReader(os.Stdin)
 
-	f := newFile("notes.txt")
+	store := New_Store("kvs_wal.log")
 
-	content_to_write := "hello, overwriting some bse bs"
-	fsync_wanted := true
+	for {
+		println("kvs > [q to quit]: ")
 
-	new_content, fsynced, err := f.open_read_write_and_fsync_if_needed(content_to_write, fsync_wanted)
-	if err != nil {
-		panic(err)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			println("error reading input:", err.Error())
+			continue
+		}
+
+		line = strings.TrimSpace(line)
+
+		if line == "" {
+			continue
+		}
+
+		if line == "q" {
+			println("exiting...")
+			break
+		}
+
+		tokens := strings.Split(line, " ")
+
+		store.Process(tokens)
+
 	}
-
-	if fsynced {
-		println("File content after write and fsync:", new_content)
-	} else {
-		println("File content after write (no fsync):", new_content)
-	}
-
-	content_to_append := "\nappending some more data to file"
-	new_content_after_append, err := f.append_to_existing_file_using_buffered_writer_then_read_the_new_content(content_to_append, fsync_wanted)
-	if err != nil {
-		panic(err)
-	}
-
-	println("File content after append:", new_content_after_append)
 }

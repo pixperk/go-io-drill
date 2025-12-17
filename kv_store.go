@@ -30,7 +30,7 @@ type wal struct {
 
 type key_val_pair_map map[key]value
 
-type store struct {
+type Store struct {
 	data key_val_pair_map
 	lock sync.RWMutex
 	wal  *wal
@@ -43,8 +43,8 @@ func new_wal(filename string) *wal {
 	}
 }
 
-func new_store(wal_filename string) *store {
-	return &store{
+func New_Store(wal_filename string) *Store {
+	return &Store{
 		data: make(key_val_pair_map),
 		lock: sync.RWMutex{},
 		wal:  new_wal(wal_filename),
@@ -109,7 +109,7 @@ func (w *wal) log_op(key key, op operation_type, value string, ttl time.Duration
 	return nil
 }
 
-func (s *store) Get(k key) (string, bool) {
+func (s *Store) Get(k key) (string, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -125,7 +125,7 @@ func (s *store) Get(k key) (string, bool) {
 	return val.data, true
 }
 
-func (s *store) Set(k key, ttl time.Duration, v string) error {
+func (s *Store) Set(k key, ttl time.Duration, v string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -145,7 +145,7 @@ func (s *store) Set(k key, ttl time.Duration, v string) error {
 	return nil
 }
 
-func (s *store) Delete(k key) error {
+func (s *Store) Delete(k key) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -157,7 +157,7 @@ func (s *store) Delete(k key) error {
 	return nil
 }
 
-func (s *store) Expire(k key, ttl time.Duration) error {
+func (s *Store) Expire(k key, ttl time.Duration) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -175,7 +175,7 @@ func (s *store) Expire(k key, ttl time.Duration) error {
 	return nil
 }
 
-func (s *store) Exists(k key) bool {
+func (s *Store) Exists(k key) bool {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -183,18 +183,19 @@ func (s *store) Exists(k key) bool {
 	return exists
 }
 
-func (s *store) Ttl(k key) (time.Time, time.Duration, time.Time, error) { //returns current time, ttl duration, expiry time, error
+func (s *Store) Ttl(k key) (string, time.Duration, string, error) { //returns current time, ttl duration, expiry time, error
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+	empty_time := format_time_into_readable_string(time.Time{})
 
 	val, exists := s.data[k]
 	if !exists {
-		return time.Time{}, 0, time.Time{}, errors.New("the key does not exist")
+		return empty_time, 0, empty_time, errors.New("the key does not exist")
 	}
 
 	//check if key has expired
 	if !val.expires_at.IsZero() && time.Now().After(val.expires_at) {
-		return time.Time{}, 0, time.Time{}, errors.New("the key has expired")
+		return empty_time, 0, empty_time, errors.New("the key has expired")
 	}
 	expiry_time := val.expires_at
 	var remaining_ttl time.Duration
@@ -203,10 +204,10 @@ func (s *store) Ttl(k key) (time.Time, time.Duration, time.Time, error) { //retu
 	} else {
 		remaining_ttl = time.Until(expiry_time)
 	}
-	return time.Now(), remaining_ttl, expiry_time, nil
+	return format_time_into_readable_string(time.Now()), remaining_ttl, format_time_into_readable_string(expiry_time), nil
 }
 
-func (s *store) read_user_command(input_parts []string) {
+func (s *Store) Process(input_parts []string) {
 	cmd := strings.ToUpper(input_parts[0])
 
 	switch cmd {
@@ -292,7 +293,7 @@ func (s *store) read_user_command(input_parts []string) {
 			log.Printf("Error getting TTL: %v\n", err)
 			return
 		} else {
-			log.Printf("Current time: %s, TTL duration: %s, Expiry time: %s for key %s\n", current_time.String(), ttl_duration.String(), expiry_time.String(), key_name)
+			log.Printf("Current time: %s, TTL duration: %s, Expiry time: %s for key %s\n", current_time, ttl_duration.String(), expiry_time, key_name)
 		}
 
 	case "EXISTS":
@@ -312,4 +313,11 @@ func (s *store) read_user_command(input_parts []string) {
 		log.Println("Unknown command")
 
 	}
+}
+
+func format_time_into_readable_string(t time.Time) string {
+	if t.IsZero() {
+		return "No Expiry"
+	}
+	return t.Format(time.RFC1123)
 }

@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
+	"hash/crc32"
 	"log"
 	"os"
 	"strings"
@@ -74,14 +76,16 @@ func (w *wal) log_op(key key, op operation_type, value string, ttl time.Duration
 	var log_entry string
 	switch op {
 	case SET:
-		log_entry = "SET " + key.name + " " + value + "\n"
+		log_entry = "SET " + key.name + " " + value
 	case DELETE:
-		log_entry = "DELETE " + key.name + "\n"
+		log_entry = "DELETE " + key.name
 	case EXPIRE:
-		log_entry = "EXPIRE " + key.name + " " + ttl.String() + "\n"
+		log_entry = "EXPIRE " + key.name + " " + ttl.String()
 	default:
 		return errors.New("unknown operation type")
 	}
+
+	log_entry = log_entry + "|" + compute_crc(log_entry) + "\n"
 
 	writer := bufio.NewWriter(fd)
 
@@ -220,7 +224,11 @@ func (s *Store) Replay_wal() error {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		parts := strings.Fields(line)
+		data, err := verify_crc(line)
+		if err != nil {
+			return err
+		}
+		parts := strings.Fields(data)
 		if len(parts) == 0 {
 			continue
 		}
@@ -229,7 +237,7 @@ func (s *Store) Replay_wal() error {
 			return err
 		}
 
-		log.Printf("Replayed WAL entry: %s\n", line)
+		log.Printf("Replayed WAL entry: %s\n", data)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -402,4 +410,27 @@ func format_time_into_readable_string(t time.Time) string {
 		return "No Expiry"
 	}
 	return t.Format(time.RFC1123)
+}
+
+func compute_crc(data string) string {
+	checksum := crc32.ChecksumIEEE([]byte(data))
+	return fmt.Sprintf("%08x", checksum)
+}
+
+func verify_crc(line string) (string, error) {
+	idx := strings.LastIndex(line, "|")
+	if idx == -1 {
+		return "", errors.New("no CRC found in line")
+	}
+
+	data := line[:idx]
+	crc_str := line[idx+1:]
+
+	computed_crc := compute_crc(data)
+
+	if computed_crc != crc_str {
+		return "", errors.New("CRC mismatch")
+	}
+
+	return data, nil
 }

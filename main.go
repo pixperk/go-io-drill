@@ -160,7 +160,9 @@ func main() {
 
 	store := New_Store("kvs_wal.log")
 
-	store.Replay_wal()
+	if err := store.Replay_wal(); err != nil {
+		log.Fatalf("Failed to replay WAL: %v", err)
+	}
 
 	for {
 		println("kvs > [q to quit]: ")

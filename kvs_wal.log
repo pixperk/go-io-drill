@@ -1,3 +1,16 @@
-SET me who|5f607fe1
-SET me jk|0cf8a4d6
-DELETE me|6cab0927
+SET user:1 alice|b724b408
+SET user:2 bob|7d988dcd
+SET user:3 charlie|39172672
+SET user:100 admin|790eff08
+SET session:abc123 user:1|f6b7ebe8
+SET session:def456 user:2|bdf6e465
+SET config:max_connections 100|3151ce8f
+SET config:timeout 30s|b47d0246
+SET cache:homepage html_content_here|53a4ed55
+SET cache:api:users json_data_here|6d9d9327
+SET order:1001 pending|7b3f7dc6
+SET order:1002 shipped|cb954416
+SET order:1003 delivered|0d8560a8
+SET log:error:1 connection timeout|108834d1
+SET log:error:2 invalid input|9f8908be
+SET log:info:1 server started|b06d7c6d

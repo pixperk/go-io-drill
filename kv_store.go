@@ -397,7 +397,10 @@ func (s *Store) Process(input_parts []string) error {
 			log.Printf("Key %s does not exist\n", key_name)
 		}
 
-		//query execution commands
+		case "HYDRATE":
+		s.HydrateSampleData()
+
+	//query execution commands
 	case "SCAN":
 		// SCAN [LIMIT n] [WHERE key LIKE pattern] [WHERE value CONTAINS str]
 		plan, err := ParseQuery(input_parts)
@@ -433,6 +436,38 @@ func (s *Store) Process(input_parts []string) error {
 	}
 
 	return nil
+}
+
+// HydrateSampleData populates the store with sample data for testing
+func (s *Store) HydrateSampleData() {
+	samples := []struct {
+		key   string
+		value string
+		ttl   time.Duration
+	}{
+		{"user:1", "alice", 0},
+		{"user:2", "bob", 0},
+		{"user:3", "charlie", 0},
+		{"user:100", "admin", 0},
+		{"session:abc123", "user:1", 5 * time.Minute},
+		{"session:def456", "user:2", 5 * time.Minute},
+		{"config:max_connections", "100", 0},
+		{"config:timeout", "30s", 0},
+		{"cache:homepage", "html_content_here", 1 * time.Minute},
+		{"cache:api:users", "json_data_here", 1 * time.Minute},
+		{"order:1001", "pending", 0},
+		{"order:1002", "shipped", 0},
+		{"order:1003", "delivered", 0},
+		{"log:error:1", "connection timeout", 0},
+		{"log:error:2", "invalid input", 0},
+		{"log:info:1", "server started", 0},
+	}
+
+	for _, sample := range samples {
+		s.Set(key{name: sample.key}, sample.ttl, sample.value)
+	}
+
+	log.Printf("Hydrated store with %d sample entries\n", len(samples))
 }
 
 func format_time_into_readable_string(t time.Time) string {

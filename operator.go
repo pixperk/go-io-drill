@@ -15,17 +15,30 @@ type Operator interface {
 	Close() error
 }
 
+// like a table scan operator
+type KVScan struct {
+	store *Store
+	keys  []key
+	pos   int
+}
+
 type Filter struct {
 	Input Operator
 	//the predicate is a function that returns true if the row should be kept
 	Pred func(row Row) bool
 }
 
-// like a table scan operator
-type KVScan struct {
-	store *Store
-	keys  []key
-	pos   int
+type Limit struct {
+	Input Operator
+	Max   int
+	count int
+}
+
+// in a key value store, a project operator can be used to return only keys or only values
+// but in a multi column store, it can be used to return only specific columns
+type Project struct {
+	Input   Operator
+	KeyOnly bool
 }
 
 func NewKVScan(store *Store) *KVScan {
@@ -88,4 +101,37 @@ func (f *Filter) Next() (*Row, error) {
 
 func (f *Filter) Close() error {
 	return f.Input.Close()
+}
+
+func (l *Limit) Open() error {
+	l.count = 0
+	return l.Input.Open()
+}
+
+func (l *Limit) Close() error {
+	return l.Input.Close()
+}
+
+func (l *Limit) Next() (*Row, error) {
+	if l.count >= l.Max {
+		return nil, nil
+	}
+
+	row, err := l.Input.Next()
+	if row != nil && err == nil {
+		l.count++
+	}
+
+	return row, err
+}
+
+func (p *Project) Open() error  { return p.Input.Open() }
+func (p *Project) Close() error { return p.Input.Close() }
+
+func (p *Project) Next() (*Row, error) {
+	row, err := p.Input.Next()
+	if row != nil && p.KeyOnly {
+		return &Row{Key: row.Key}, nil
+	}
+	return row, err
 }
